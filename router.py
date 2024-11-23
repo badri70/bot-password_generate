@@ -1,28 +1,28 @@
-import string
-import random
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command, CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
-
+from aiogram.fsm.context import FSMContext
+from generate_password import generate_password_logic
 
 
 router = Router()
+password_settings = {}
 
 
 class PasswrodState(StatesGroup):
     length = State()
     digits = State()
     letters = State()
-    Special_characters = State()
+    special_characters = State()
 
 
 @router.message(CommandStart())
 async def start(message: Message):
     keybord = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Сгенерировать пароль"), KeyboardButton(text="Настройки генерации")],
+            [KeyboardButton(text="Сгенерировать пароль"), KeyboardButton(text="Настроить генерацию пароля")],
             [KeyboardButton(text="Сохраненные пароли"), KeyboardButton(text="Рекомендации по безопасности")]
         ],
         resize_keyboard=True
@@ -49,23 +49,63 @@ async def start(message: Message):
 
 
 @router.message(lambda message: message.text == "Сгенерировать пароль" or message.text == "/generate")
-async def generate(message: Message):
+async def generate(message: Message, state: FSMContext):
     keybord = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Сохранить пароль", callback_data="save")]
     ])
 
-    char = ""
-    char+=string.ascii_letters
-    char+=string.digits
-    char+=string.punctuation
+    user_data = await state.get_data()
 
-    password = []
+    # Если пользователь не настроил параметры, установим значения по умолчанию
+    length = password_settings.get("length", 12)
+    digits = password_settings.get("digits", True)
+    letters = password_settings.get("letters", True)
+    specials = password_settings.get("special_characters", True)
 
-    for el in range(14):
-        letter = random.choice(char)
-        password.append(letter)
-    
-    await message.answer("Ваш сгенерированный пароль: " + "".join(password), reply_markup=keybord)
+    password = generate_password_logic(length, digits, letters, specials)
+    await message.answer(f"Ваш пароль: {password}", reply_markup=keybord)
+
+
+@router.message(lambda message: message.text == "Настроить генерацию пароля")
+async def configure_password(message: Message, state: FSMContext):
+    await message.answer("Введите длину пароля (например, 12):")
+    await state.set_state(PasswrodState.length)
+
+
+@router.message(PasswrodState.length)
+async def set_length(message: Message, state: FSMContext):
+    await state.update_data(length=int(message.text))
+    await message.answer("Включать цифры? (да/нет):")
+    await state.set_state(PasswrodState.digits)
+
+
+@router.message(PasswrodState.digits)
+async def set_digits(message: Message, state: FSMContext):
+    include_digits = message.text.lower() in ["да", "yes"]
+    await state.update_data(digits=include_digits)
+    await message.answer("Включать буквы? (да/нет):")
+    await state.set_state(PasswrodState.letters)
+
+
+@router.message(PasswrodState.letters)
+async def set_letters(message: Message, state: FSMContext):
+    include_letters = message.text.lower() in ["да", "yes"]
+    await state.update_data(letters=include_letters)
+    await message.answer("Включать спецсимволы? (да/нет):")
+    await state.set_state(PasswrodState.special_characters)
+
+
+@router.message(PasswrodState.special_characters)
+async def save_custom_settings(message: Message, state: FSMContext):
+    include_specials = message.text.lower() in ["да", "yes"]
+    await state.update_data(special_characters=include_specials)
+    settings = await state.get_data()
+    password_settings['length'] = settings.get("length", 12)
+    password_settings['digits'] = settings.get("digits", True)
+    password_settings['letters'] = settings.get("letters", True)
+    password_settings['special_characters'] = settings.get("special_characters", True)
+    await message.answer("Настройки сохранены! Вы можете теперь сгенерировать пароль.")
+    await state.clear()
 
 
 @router.message(lambda message: message.text == "Рекомендации по безопасности" or message.text == "/help")
