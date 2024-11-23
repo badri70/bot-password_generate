@@ -1,5 +1,5 @@
 from aiogram import Router
-from aiogram.types import Message
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import Command, CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
@@ -9,6 +9,7 @@ from generate_password import generate_password_logic
 
 router = Router()
 password_settings = {}
+passwords = {}
 
 
 class PasswrodState(StatesGroup):
@@ -16,6 +17,10 @@ class PasswrodState(StatesGroup):
     digits = State()
     letters = State()
     special_characters = State()
+
+
+class SavePasswordState(StatesGroup):
+    waiting_for_signature = State()
 
 
 @router.message(CommandStart())
@@ -56,14 +61,34 @@ async def generate(message: Message, state: FSMContext):
 
     user_data = await state.get_data()
 
-    # Если пользователь не настроил параметры, установим значения по умолчанию
     length = password_settings.get("length", 12)
     digits = password_settings.get("digits", True)
     letters = password_settings.get("letters", True)
     specials = password_settings.get("special_characters", True)
 
     password = generate_password_logic(length, digits, letters, specials)
+    await state.update_data(password=password)
     await message.answer(f"Ваш пароль: {password}", reply_markup=keybord)
+
+
+# Обработка нажатия кнопки "Сохранить пароль"
+@router.callback_query(lambda call: call.data == "save")
+async def save_password(callback_query: CallbackQuery, state: FSMContext):
+    await callback_query.message.answer("Введите подпись к паролю:")
+    await state.set_state(SavePasswordState.waiting_for_signature)
+
+
+@router.message(SavePasswordState.waiting_for_signature)
+async def get_signature(message: Message, state: FSMContext):
+    user_data = await state.get_data()
+    password = user_data.get("password")
+    signature = message.text
+
+    # Логика сохранения пароля с подписью
+    passwords[f'{signature}'] = f'{password}'
+    # Здесь можно сохранить в базу данных, файл или отправить куда-либо
+    await message.answer(f"Пароль сохранен!\nПодпись: {signature}\nПароль: {password}")
+    await state.clear()
 
 
 @router.message(lambda message: message.text == "Настроить генерацию пароля")
@@ -106,6 +131,12 @@ async def save_custom_settings(message: Message, state: FSMContext):
     password_settings['special_characters'] = settings.get("special_characters", True)
     await message.answer("Настройки сохранены! Вы можете теперь сгенерировать пароль.")
     await state.clear()
+
+
+@router.message(lambda message: message.text == "Сохраненные пароли" or message.text == "/saved")
+async def show_all_passwords(message: Message):
+    for key, value in passwords.items():
+        await message.answer(f"{key}: {value}")
 
 
 @router.message(lambda message: message.text == "Рекомендации по безопасности" or message.text == "/help")
